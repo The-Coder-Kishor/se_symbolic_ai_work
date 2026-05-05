@@ -1,0 +1,291 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage[T1]{fontenc}
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{xurl}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black
+}
+
+\title{Neuro-Symbolic Agentic Code Intelligence: A Rule-Governed NSN Pipeline for Agent Suites and SWE-bench Patch Generation%
+}
+
+\author{
+\IEEEauthorblockN{Adithya Kishor}
+\IEEEauthorblockA{Extra Project \\
+Roll Num: \texttt{2023111019} \\
+Project repository: \url{https://gitfront.io/r/afoolishman/rPbsa8yXe8Tm/se-symbolic-ai-work/} }
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Autonomous LLM agents are increasingly used for software engineering tasks such as support, research, and patch generation, but purely neural pipelines remain brittle under safety, format, and policy constraints. This project implements and evaluates a lightweight Neuro-Symbolic-Neuro (NSN) architecture that wraps LLM generations with deterministic symbolic checks and iterative refinement. We contribute (i) an \emph{agentic system} for defining YAML-configured agents with rule sets, tool access, memory bounds, and test suites that compare NSN to neural-only baselines; (ii) a \emph{SWE-bench slice runner} that generates unified diffs under a static-analysis rule engine and exports predictions for SWE-bench harnesses; and (iii) an analysis of how symbolic governance improves output quality (well-formed diffs, citation presence, safety conformance) while trading off latency. We report results on a curated 10-instance SWE-bench Lite slice and a rule-driven agent test suite, and outline planned extensions including stronger program analysis, execution-based verification, and learning-to-compile symbolic constraints from failures.
+\end{abstract}
+
+\begin{IEEEkeywords}
+neuro-symbolic AI, agentic systems, software engineering, SWE-bench, LLM governance, symbolic rules, iterative refinement
+\end{IEEEkeywords}
+
+\section{Introduction}
+LLM-based assistants are shifting toward \emph{agentic} systems: multi-turn entities that plan, call tools, and produce artifacts such as patches. Despite strong generative capacity, neural-only agents can violate non-negotiable constraints (e.g., PII policies, tool-use restrictions, citation requirements) and can fail to produce machine-consumable artifacts (e.g., malformed diffs). Motivated by architectural patterns for neuro-symbolic multi-agent systems, the project aims to make agent outputs more \emph{deterministic, auditable, and constraint-aligned} by integrating symbolic rule engines directly into the generation loop.
+
+This work operationalizes a pragmatic NSN pattern: \emph{Neural generation} produces an answer or patch; \emph{Symbolic checking} deterministically validates it against explicit rules; \emph{Neural refinement} rewrites the output using violation feedback, repeated for a bounded number of rounds.
+
+\section{Background and Motivation}
+The accompanying project write-up emphasizes that purely neural multi-agent systems lack deterministic reliability and explainability for mission-critical settings, motivating neuro-symbolic integration~\cite{nsai_project_writeup}. In software engineering, this gap is visible in: (i) safety policy adherence (PII leakage, unsafe instructions), (ii) formatting and protocol compliance (diff structure, required citations), and (iii) predictable behavior under governance (blocking, redaction, constrained autonomy).
+
+\section{Related Work (Brief)}
+Benchmarking LLMs for software engineering has been popularized by SWE-bench, which evaluates whether models can resolve real GitHub issues by producing patches that pass repository tests~\cite{swebench}. In parallel, multiple lines of work explore \emph{agentic} workflows (planning, tool use, multi-step refinement) and \emph{guardrails} (policy enforcement, structured outputs). This project focuses on an engineering-centric slice of that space: a minimal symbolic layer that is easy to implement, fast to extend, and produces human-auditable violation reports, while remaining compatible with standard patch-based harnesses.
+
+\section{System Overview}
+\subsection{Architectural Patterns Adopted}
+Guided by neuro-symbolic multi-agent architecture patterns, the implemented design instantiates the following reusable patterns:
+\begin{itemize}
+  \item \textbf{Central orchestration with constrained autonomy}: a CLI runtime mediates model calls and enforces pre/post checks; agents do not directly ``self-execute'' actions outside declared tools.
+  \item \textbf{Hierarchical memory discipline}: conversational memory is bounded (turn window) and treated separately from explicit symbolic state (rule definitions, test assertions, violation logs).
+  \item \textbf{Deterministic governance layer}: symbolic checks provide hard constraints and structured violation reports that remain stable across runs, enabling regression testing of safety and formatting behavior.
+  \item \textbf{Neuro-Symbolic-Neuro refinement}: violations are fed back as machine-generated critiques that drive targeted rewriting.
+\end{itemize}
+
+\subsection{Agentic System (Rule-Governed Agents)}
+The \texttt{agentic\_system/} component provides a CLI to \emph{define}, \emph{inspect}, \emph{chat}, and \emph{test} agents. Agents are configured via YAML with:
+\begin{itemize}
+  \item \textbf{Role prompt}: long-form task specification.
+  \item \textbf{Model and decoding}: OpenRouter-hosted chat model and max tokens.
+  \item \textbf{Bounded memory}: rolling window of prior turns.
+  \item \textbf{Symbolic rule set}: built-in rules (e.g., \texttt{no\_pii}, \texttt{no\_code\_execution}, \texttt{must\_cite\_sources}, \texttt{no\_bare\_except}) and custom regex rules.
+  \item \textbf{Tools}: optional deterministic utilities (e.g., word count, uppercase) exposed as tool calls.
+\end{itemize}
+
+\subsection{NSN Runtime}
+For each user turn, the runtime executes:
+\begin{enumerate}
+  \item \textbf{Pre-check (input)}: symbolic validation; optionally block if violations occur.
+  \item \textbf{Neural generation}: single LLM call, with rule constraints injected in the system prompt (NSN mode) or without them (neural-only baseline).
+  \item \textbf{Post-check (output)}: symbolic validation of the generated output.
+  \item \textbf{Refinement loop}: if violations exist and refinement budget remains, the LLM is called again with structured violation feedback to produce a corrected output.
+\end{enumerate}
+This design yields a \emph{bounded} and \emph{auditable} control loop: violations are explicit, checks are deterministic, and refinement rounds are capped.
+
+\subsection{Symbolic Contract and Refinement Prompting}
+The symbolic layer defines an explicit contract \(C\) over an output \(y\) (answer text or patch). Each rule \(r_i \in C\) deterministically maps \(y \mapsto \{\text{pass},\text{fail}\}\) with an explanation string. In NSN mode, violations are converted into a structured refinement request:
+\begin{itemize}
+  \item \textbf{Constraints as instructions}: a human-readable list of active rule descriptions is injected before generation.
+  \item \textbf{Violations as feedback}: the post-check produces a list of failures; the refinement prompt includes the current output and enumerated violations to fix.
+\end{itemize}
+This makes refinement \emph{targeted} (fix specific failures) rather than generic self-critique.
+
+\subsection{SWE-bench Patch Generation Runner}
+The \texttt{swe\_bench/} component benchmarks NSN versus neural-only on a curated 10-instance SWE-bench Lite slice. Each task prompts the model to output \emph{only} a unified diff. A symbolic rule engine performs deterministic static checks over \emph{added lines} and diff structure. Active checks include:
+\begin{itemize}
+  \item no shell-injection primitives (\texttt{os.system}, \texttt{eval}, \texttt{exec});
+  \item no hardcoded secrets (\texttt{api\_key}, \texttt{token}, etc.);
+  \item no bare \texttt{except:};
+  \item patch shape requirements (presence of \texttt{---}/\texttt{+++} headers and \texttt{@@} hunks);
+  \item no debug prints on added lines.
+\end{itemize}
+NSN adds constraint text to the prompt and refines a patch up to two times if violations are detected; neural-only performs no refinement.
+
+\section{Evaluation Setup}
+\subsection{Metrics}
+We report:
+\begin{itemize}
+  \item \textbf{Patch validity} (\texttt{patch\_valid}): whether the output is a non-trivial unified diff containing \texttt{---}/\texttt{+++} file headers and at least one \texttt{@@ ... @@} hunk header. This is a \emph{harness-compatibility proxy}: invalid patches cannot be applied or evaluated by downstream tooling.
+  \item \textbf{Symbolic safety rate} (\texttt{safety\_rate}): fraction of active symbolic checks passed by the \emph{final} output:
+  \[
+    \texttt{safety\_rate} = \frac{\#\texttt{checks\_passed}}{\#\texttt{checks\_total}}.
+  \]
+  In \texttt{swe\_bench/}, checks are patch-focused safety/shape constraints; in \texttt{agentic\_system/}, checks correspond to the enabled agent rule set (e.g., no-PII, must-cite-sources).
+  \item \textbf{Refinement rounds} (\texttt{refinement\_rounds}): number of correction iterations executed by NSN after post-check failures, capped by configuration (\(\leq 2\) in \texttt{swe\_bench/}; agent YAML config controls this in \texttt{agentic\_system/}).
+\end{itemize}
+
+\subsection{Experimental Protocol: SWE-bench Slice Runner}
+The SWE-bench experiment uses the offline 10-instance slice in \texttt{swe\_bench/swebench\_sample.py}. For each instance and approach (\texttt{neural\_only}, \texttt{nsn}):
+\begin{itemize}
+  \item The model receives a system instruction to output \emph{only} a unified diff in a \texttt{```diff} fence.
+  \item In NSN, a human-readable list of symbolic constraints is appended to the user prompt (e.g., ``Patch must contain \texttt{@@} hunk headers'').
+  \item The patch is extracted from the first fenced diff/patch block; if none exists, raw output is used.
+  \item Symbolic checks are applied to the patch text (Section~\ref{sec:rules_swe}).
+  \item In NSN, if \emph{any} violations exist, a refinement prompt is constructed containing: (i) the current diff, and (ii) the enumerated violation messages; the model must return a corrected diff. This repeats until violations disappear or refinement budget is exhausted.
+\end{itemize}
+
+\subsection{Experimental Protocol: Agentic Rule Tests}
+The agentic experiment uses YAML suites (e.g., \texttt{agentic\_system/tests/}) where each case defines an input and assertions. For each case and approach:
+\begin{itemize}
+  \item The agent memory is cleared per-approach per-case (clean A/B comparison).
+  \item \textbf{Pre-check}: input is validated; if blocking rules trigger and \texttt{block\_on\_input\_violation=true}, the turn is blocked.
+  \item \textbf{Generation}: the LLM produces an output (NSN includes constraints; neural-only does not).
+  \item \textbf{Post-check and refinement}: output is validated; if output violations occur and refinement is enabled, the runtime asks the model to rewrite with violation feedback.
+  \item The test runner then evaluates assertions: text contains/does-not-contain, blocked/not-blocked, and whether symbolic pass/fail matches expectation.
+\end{itemize}
+
+\subsection{Agent Test Suites}
+Test suites are written in YAML and executed by a runner that asserts:
+\textbf{content constraints} (must contain / must not contain phrases), \textbf{blocking behavior}, and \textbf{symbolic pass/fail} (whether post-violations should be empty).
+
+\subsection{SWE-bench Slice}
+We use a fixed offline 10-task slice representing diverse repos (e.g., Django, Matplotlib, Scikit-learn, SymPy). The evaluation in this project focuses on \textbf{artifact validity} (unified diff structure) and \textbf{symbolic safety compliance} for patch text. Full SWE-bench dockerized execution is a planned next step (Section~\ref{sec:future}).
+
+\section{Results and Analysis}
+\subsection{Symbolic Rule Sets Used in Experiments}
+\label{sec:rules_swe}
+Table~\ref{tab:swe_rules} lists the active SWE-bench symbolic checks. These are intentionally lightweight and deterministic, designed to prevent common ``pipeline-breakers'' (malformed diffs) and obviously unsafe additions (secrets, shell injection).
+
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{Active symbolic checks in \texttt{swe\_bench/} (static on patch text).}
+\label{tab:swe_rules}
+\begin{tabular}{p{2.8cm}p{4.6cm}}
+\toprule
+\textbf{Rule} & \textbf{Meaning (what it prevents)} \\
+\midrule
+\texttt{diff\_has\_file\_header} & Patch must contain \texttt{---} and \texttt{+++} file markers; prevents non-unified output. \\
+\texttt{diff\_has\_hunk\_header} & Patch must contain at least one \texttt{@@ ... @@}; prevents empty or context-less diffs. \\
+\texttt{no\_bare\_except} & No added line may introduce \texttt{except:}; prevents overly broad exception handling. \\
+\texttt{no\_shell\_injection} & Forbids \texttt{os.system(}, \texttt{eval(}, \texttt{exec(} on added lines; prevents obvious injection primitives. \\
+\texttt{no\_hardcoded\_secrets} & Forbids patterns like \texttt{api\_key = "..."}; prevents accidental secret materialization. \\
+\texttt{no\_debug\_prints} & Blocks added debug prints matching ``print(...debug...)''; reduces low-quality patches. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{SWE-bench Slice: Patch Validity and Symbolic Safety}
+Table~\ref{tab:swebench} summarizes outcomes. Neural-only produced one empty/malformed patch (missing diff headers/hunks), while NSN produced well-formed diffs across all 10 tasks.
+
+\begin{table}[t]
+\centering
+\caption{SWE-bench slice results (10 tasks).}
+\label{tab:swebench}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Approach} & \textbf{Patch-valid} & \textbf{Avg. safety rate} & \textbf{Refinements} \\
+\midrule
+Neural-only & 0.90 & 0.967 & 0 \\
+NSN & 1.00 & 1.000 & $\leq 2$ (bounded) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Observed quality improvement.} The symbolic checks act as an output contract: the diff must be machine-consumable and must not introduce flagged patterns. The NSN loop converts this contract into actionable feedback, enabling recovery from malformed outputs without manual intervention.
+
+\textbf{Failure recovery example.} In the Django task \texttt{django\_\_django-11179}, the neural-only approach returned an empty patch, failing both diff-shape rules. NSN performed two refinement rounds and produced a unified diff with valid headers and hunks, satisfying all symbolic checks. While this does not guarantee semantic correctness, it meaningfully reduces ``pipeline breaks'' where downstream harnesses cannot even evaluate a submission.
+
+\textbf{What the numbers mean.}
+\begin{itemize}
+  \item \textbf{Patch-valid 0.90 vs 1.00}: in 1/10 tasks, the neural-only run produced an artifact that could not be treated as a unified diff. NSN eliminated this failure mode on the slice.
+  \item \textbf{Safety 0.967 vs 1.000}: neural-only failed, on average, \(3.3\%\) of enabled checks (often driven by empty/malformed diff artifacts which fail structural checks). NSN satisfied all checks for all tasks in the slice.
+\end{itemize}
+
+\textbf{Trade-off.} NSN increases latency due to extra symbolic passes and occasional additional LLM calls. In this implementation, latency is the wall-clock duration of the end-to-end generation (including refinement). This overhead is justified when the system value is in \emph{automation reliability} (fewer manual retries, fewer harness failures).
+
+\subsection{SWE-bench Slice: Per-Difficulty Breakdown}
+Table~\ref{tab:diffbreakdown} shows patch-validity and symbolic compliance stratified by the slice difficulty labels. The key observation is that symbolic conformance remains stable across difficulty for NSN, whereas neural-only can fail even on an ``easy'' instance if it returns an empty or malformed artifact.
+
+\begin{table}[t]
+\centering
+\caption{Per-difficulty conformance on the 10-task SWE-bench slice.}
+\label{tab:diffbreakdown}
+\begin{tabular}{lcccc}
+\toprule
+\multirow{2}{*}{\textbf{Difficulty}} & \multicolumn{2}{c}{\textbf{Patch-valid}} & \multicolumn{2}{c}{\textbf{Avg. safety}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & \textbf{Neural} & \textbf{NSN} & \textbf{Neural} & \textbf{NSN} \\
+\midrule
+Easy (4)   & 0.75 & 1.00 & 0.917 & 1.000 \\
+Medium (5) & 1.00 & 1.00 & 1.000 & 1.000 \\
+Hard (1)   & 1.00 & 1.00 & 1.000 & 1.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Agentic System: Rule-Constrained Output Quality}
+From a sample report (\texttt{agentic\_system/report.json}) with 5 cases per approach:
+\begin{itemize}
+  \item \textbf{Pass rate}: both approaches achieved 4/5 on the suite, but for different reasons (baseline failed a citation/language requirement case; NSN failed an expectation where the suite anticipated a violation that did not occur).
+  \item \textbf{Safety alignment}: NSN maintains a deterministic post-check and can iteratively enforce constraints such as mandatory citations.
+  \item \textbf{Behavioral governance}: input blocking (e.g., explicit code execution requests) is enforced pre-generation, preventing unsafe interactions.
+\end{itemize}
+
+\subsection{Agentic Test Suite Summary}
+Table~\ref{tab:agentic} aggregates the same report into suite-level metrics. Although pass rate is similar in this small sample, NSN provides higher controllability when requirements are strict (e.g., citations present, language constraints) because violations can be surfaced and repaired automatically.
+
+\begin{table}[t]
+\centering
+\caption{Agentic suite summary (5 cases per approach).}
+\label{tab:agentic}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Approach} & \textbf{Suite pass rate} & \textbf{Avg. safety rate} & \textbf{Avg. refinements} \\
+\midrule
+Neural-only & 0.80 & 0.80 & 0 \\
+NSN & 0.80 & 1.00 & 0.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpreting these numbers.}
+\begin{itemize}
+  \item \textbf{Suite pass rate}: proportion of test cases whose \emph{assertions} match the observed behavior. This is a functional metric over the test harness, not a direct measure of correctness in the open world.
+  \item \textbf{Avg. safety rate}: fraction of symbolic constraints satisfied by the final output. Here, the NSN safety rate is higher because it explicitly performs post-check and can refine to satisfy requirements (e.g., ``must include a citation marker'').
+  \item \textbf{Avg. refinements 0.8}: on average, NSN needed just under one correction call per test case. This indicates that the symbolic layer is not only detecting problems but also enabling automatic repair.
+\end{itemize}
+
+\subsection{Notes on How Symbolic AI Improved Output Quality}
+Across both components, the symbolic layer improved output quality via:
+\begin{itemize}
+  \item \textbf{Format reliability}: diff-shape rules prevent empty/unparseable patches and enable downstream automation (harness ingestion, patch application).
+  \item \textbf{Safety and policy compliance}: PII, code-execution requests, and other forbidden patterns are caught deterministically.
+  \item \textbf{Explainability}: each violation is attributed to a named rule with a human-readable explanation, supporting audits and debugging.
+  \item \textbf{Bounded correction}: refinement rounds provide a controlled repair mechanism instead of open-ended agent behavior.
+\end{itemize}
+
+\subsection{Limitations}
+The current results primarily quantify \emph{conformance} (valid diff shape and rule compliance), not \emph{functional correctness}. The symbolic rules are intentionally lightweight (regex and structural checks) and may miss deeper issues (e.g., subtle security vulnerabilities, semantic regressions, incomplete fixes). Additionally, refinement can sometimes ``overfit'' constraints by producing superficially compliant but low-quality outputs; mitigating this requires stronger objective signals (tests, static analysis, or reward models).
+
+\section{Planned Future Work}
+\label{sec:future}
+This project is intentionally modular to enable progressively stronger symbolic governance and stronger software-engineering evaluation:
+\begin{itemize}
+  \item \textbf{Execution-based verification}: run generated patches in containerized SWE-bench evaluation to measure task resolution, not only diff validity.
+  \item \textbf{Stronger static analysis}: integrate language-aware linters/AST checks (e.g., Python AST safety rules) beyond regex matching; add repository-specific constraints.
+  \item \textbf{Constraint learning}: automatically propose new symbolic rules from recurring post-violations and failure clusters (meta-governance).
+  \item \textbf{Multi-agent orchestration}: extend from single-agent NSN loops to multi-agent collaboration with centralized symbolic policy enforcement and shared symbolic memory.
+  \item \textbf{Cost/latency optimization}: adaptive refinement (stop early on high-confidence passes), caching of check results, and selective rule activation per task type.
+  \item \textbf{SWE-bench integration details}: integrate repository checkout and patch application to run unit tests locally, enabling per-task correctness diagnostics and richer error-aware refinement (e.g., failing test traces as symbolic signals).
+\end{itemize}
+
+\subsection{Extra Work Planned (Expanded)}
+The next planned milestones focus on moving from \emph{conformance} to \emph{correctness} while keeping symbolic governance first-class:
+\begin{itemize}
+  \item \textbf{Patch application and rollback}: automatically apply diffs to a clean checkout and validate they apply cleanly; if not, refine using the apply error as a symbolic signal.
+  \item \textbf{Test-driven refinement}: incorporate failing unit test output into the refinement prompt while keeping safety/format rules active.
+  \item \textbf{Repository-aware constraints}: enable per-repository rule profiles (e.g., ``no new dependencies''; ``touch only specified files''; ``preserve public API'').
+  \item \textbf{Long-horizon agent workflows}: add multi-step planners (issue triage $\rightarrow$ hypothesis $\rightarrow$ patch $\rightarrow$ test) governed by the same rule engine at each artifact boundary.
+  \item \textbf{Evaluation at scale}: run larger SWE-bench slices and compare not just patch-validity but task resolution rate, with ablations over rule sets and refinement budgets.
+\end{itemize}
+
+\section{Conclusion}
+We implemented a practical NSN neuro-symbolic pattern for software engineering agents and patch generation. Results on a curated SWE-bench Lite slice show improved artifact validity and perfect symbolic safety compliance under explicit rules, demonstrating that symbolic governance can systematically improve output quality and auditability in agentic pipelines. The next phase is to couple these guarantees with execution-based correctness to quantify end-to-end gains on SWE-bench.
+
+\section*{Artifacts}
+Project components referenced in this draft:
+\texttt{agentic\_system/} (rule-governed agent framework), and \texttt{swe\_bench/} (SWE-bench slice runner and outputs).
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}
+
