@@ -1,0 +1,44 @@
+name: research_agent
+role: |
+  You are a research assistant helping academics and students find and summarise information.
+  For every factual claim you make, include a citation marker like [1] or "(source)".
+  Be thorough but concise. Do not fabricate citations — if unsure, say so.
+
+model: moonshotai/kimi-k2-thinking
+max_tokens: 800
+memory_turns: 8
+max_refinement_rounds: 2
+block_on_input_violation: false
+block_on_output_violation: false
+
+rules:
+  name: research_constraints
+  items:
+    - type: builtin
+      rule: must_cite_sources
+      severity: warning
+
+    - type: builtin
+      rule: no_pii
+
+    - type: builtin
+      rule: max_output_length
+      params:
+        max_chars: 2400
+
+    - type: custom
+      name: no_absolute_certainty
+      description: Agent must not use unqualified absolute certainty language
+      severity: warning
+      forbidden_output_patterns:
+        - "\\bit is (?:a fact|certain|proven|undeniable) that\\b"
+        - "\\beveryone knows\\b"
+        - "\\bobviously\\b"
+
+    - type: builtin
+      rule: output_language
+      params:
+        language: english
+
+tools:
+  - word_count

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSAI Benchmark Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;700;800&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #1e1e2e;
+    --accent-n: #4ade80;   /* neural = green */
+    --accent-s: #f59e0b;   /* symbolic = amber */
+    --accent-ns: #38bdf8;  /* nsn = sky */
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --danger: #f43f5e;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  header {
+    margin-bottom: 2.5rem;
+  }
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: clamp(1.5rem, 3vw, 2.4rem);
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: #fff;
+  }
+  header p {
+    color: var(--muted);
+    margin-top: 0.5rem;
+    font-size: 12px;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .badge-nsn  { background: #0e2d3f; color: var(--accent-ns); border: 1px solid var(--accent-ns); }
+  .badge-n    { background: #0d2018; color: var(--accent-n); border: 1px solid var(--accent-n); }
+  .badge-sg   { background: #2d1a04; color: var(--accent-s); border: 1px solid var(--accent-s); }
+
+  /* Grid layout */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+  }
+  .card h3 { font-family: 'Syne', sans-serif; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 0.75rem; }
+  .card .big { font-family: 'Syne', sans-serif; font-size: 2rem; font-weight: 800; color: #fff; }
+  .card .sub { color: var(--muted); font-size: 11px; margin-top: 0.25rem; }
+
+  /* Bar chart */
+  .chart-section { margin-bottom: 2rem; }
+  .chart-section h2 { font-family: 'Syne', sans-serif; font-size: 1rem; font-weight: 700; margin-bottom: 1rem; color: #fff; }
+  .bar-group { margin-bottom: 1.25rem; }
+  .bar-label { display: flex; justify-content: space-between; margin-bottom: 0.35rem; font-size: 11px; color: var(--muted); }
+  .bar-track { height: 22px; background: var(--border); border-radius: 4px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 1.2s cubic-bezier(0.16, 1, 0.3, 1); display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 700; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 400; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; }
+  td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .pass { color: var(--accent-n); }
+  .fail { color: var(--danger); }
+  .pill { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 10px; }
+
+  /* Simulation controls */
+  .controls { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.45rem 1rem;
+    border-radius: 5px;
+    cursor: pointer;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  button:hover { border-color: var(--accent-ns); background: #0e2d3f; color: var(--accent-ns); }
+  button.active { border-color: var(--accent-ns); background: #0e2d3f; color: var(--accent-ns); }
+
+  .separator { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+  .pipeline-diagram { display: flex; align-items: center; gap: 0; margin: 1.5rem 0; overflow-x: auto; padding-bottom: 0.5rem; }
+  .pipe-node { text-align: center; min-width: 110px; }
+  .pipe-box { border-radius: 6px; padding: 0.6rem 0.5rem; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; }
+  .pipe-box.neural { background: #0d2018; border: 1px solid var(--accent-n); color: var(--accent-n); }
+  .pipe-box.symbolic { background: #2d1a04; border: 1px solid var(--accent-s); color: var(--accent-s); }
+  .pipe-box.neural2 { background: #0a1f2e; border: 1px solid var(--accent-ns); color: var(--accent-ns); }
+  .pipe-label { font-size: 9px; color: var(--muted); margin-top: 4px; }
+  .pipe-arrow { color: var(--muted); font-size: 18px; flex-shrink: 0; padding: 0 4px; }
+
+  footer { color: var(--muted); font-size: 10px; margin-top: 3rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Neuro-Symbolic Code Gen &mdash; Benchmark Dashboard</h1>
+  <p>SWE-bench Lite &middot; <span class="badge badge-n">Neural Only</span> &nbsp;
+     <span class="badge badge-nsn">Neuro-Symbolic-Neuro</span> &nbsp;
+     <span class="badge badge-sg">Symbolic Guided</span> &nbsp;&middot;&nbsp;
+     Patches validated locally; full resolution uses official SWE-bench harness on exported JSONL</p>
+</header>
+
+<!-- Pipeline diagram -->
+<div class="card" style="margin-bottom:2rem">
+  <h3>NSN Pipeline (Neuro → Symbolic → Neuro)</h3>
+  <div class="pipeline-diagram">
+    <div class="pipe-node">
+      <div class="pipe-box neural">NEURAL AGENT</div>
+      <div class="pipe-label">LLM generates code</div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-node">
+      <div class="pipe-box symbolic">SYMBOLIC ENGINE</div>
+      <div class="pipe-label">Rule validation</div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-node">
+      <div class="pipe-box neural2">VIOLATIONS?</div>
+      <div class="pipe-label">Decision gate</div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-node">
+      <div class="pipe-box neural">NEURAL REFINE</div>
+      <div class="pipe-label">LLM corrects issues</div>
+    </div>
+    <div class="pipe-arrow">→</div>
+    <div class="pipe-node">
+      <div class="pipe-box symbolic">FINAL CHECK</div>
+      <div class="pipe-label">Verified output</div>
+    </div>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="grid" id="summary-cards">
+  <!-- populated by JS -->
+</div>
+
+<p id="live-banner" class="card" style="margin-bottom:1rem;font-size:12px;color:var(--muted);border-color:#1e3a4f;">
+  Loading benchmark results…
+</p>
+
+<!-- Controls -->
+<div class="controls">
+  <button class="active" id="btn-live" onclick="reloadLiveResults()">Live results (results.json)</button>
+  <input type="file" id="results-file" accept=".json,application/json" hidden />
+  <button type="button" onclick="document.getElementById('results-file').click()">Load JSON file…</button>
+  <button type="button" data-scenario="default" onclick="loadScenario('default')">Demo: Default</button>
+  <button type="button" data-scenario="hard" onclick="loadScenario('hard')">Demo: Hard</button>
+  <button type="button" data-scenario="safety_focus" onclick="loadScenario('safety_focus')">Demo: Safety</button>
+  <button type="button" onclick="randomize()">↺ Randomize demo</button>
+</div>
+
+<!-- Bar charts -->
+<div class="chart-section">
+  <h2>Correctness Rate</h2>
+  <div id="correctness-chart"></div>
+</div>
+
+<div class="chart-section">
+  <h2>Safety / Symbolic Compliance</h2>
+  <div id="safety-chart"></div>
+</div>
+
+<div class="chart-section">
+  <h2>Avg Latency (ms) — lower is better</h2>
+  <div id="latency-chart"></div>
+</div>
+
+<hr class="separator">
+
+<!-- Per-task table -->
+<div class="chart-section">
+  <h2>Per-task Results</h2>
+  <div class="card">
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th>Task</th>
+          <th>Difficulty</th>
+          <th>Approach</th>
+          <th>Correctness</th>
+          <th>Safety</th>
+          <th>Latency</th>
+          <th>Tests passed</th>
+          <th>Violations</th>
+        </tr>
+      </thead>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<footer>
+  Dashboard loads <code>results.json</code> via fetch (same folder). Browsers block fetch from <code>file://</code> — run
+  <code>python -m http.server 8080</code> in this directory and open <code>http://localhost:8080/index.html</code>, or use <strong>Load JSON file…</strong>.
+  NSAI benchmark suite &middot; NSN / SALLMA
+</footer>
+
+<script>
+const APPROACHES = ['neural_only','nsn','symbolic_guided'];
+const COLORS = { neural_only: '#4ade80', nsn: '#38bdf8', symbolic_guided: '#f59e0b' };
+const LABELS = { neural_only: 'Neural Only', nsn: 'Neuro-Symbolic-Neuro', symbolic_guided: 'Symbolic Guided' };
+
+// Placeholder task labels for demo charts; live SWE-bench instance_ids come from results.json
+const CF_TASKS = Array.from({ length: 10 }, (_, i) => `SWE-bench Lite #${i + 1}`);
+const CF_DIFF = ['medium','medium','medium','medium','medium','medium','medium','medium','medium','medium'];
+
+const SCENARIOS = {
+  default: {
+    tasks: CF_TASKS,
+    difficulties: CF_DIFF,
+    live: false,
+    data: {
+      neural_only:      { correctness:[0.82,0.78,0.76,0.80,0.62,0.58,0.55,0.60,0.57,0.42], safety:[0.62,0.60,0.58,0.61,0.55,0.52,0.54,0.53,0.51,0.48], latency:[780,760,800,770,920,960,990,940,950,1120] },
+      nsn:              { correctness:[0.92,0.90,0.88,0.91,0.85,0.82,0.80,0.84,0.83,0.72], safety:[0.96,0.95,0.94,0.95,0.93,0.92,0.91,0.92,0.91,0.88], latency:[1700,1650,1800,1720,2100,2300,2400,2200,2250,2800] },
+      symbolic_guided:  { correctness:[0.85,0.82,0.80,0.83,0.68,0.65,0.62,0.66,0.64,0.52], safety:[0.82,0.80,0.78,0.81,0.74,0.72,0.70,0.73,0.71,0.68], latency:[1150,1180,1200,1160,1450,1500,1550,1480,1520,1750] },
+    }
+  },
+  hard: {
+    tasks: ['SWE-bench Lite #8','SWE-bench Lite #9','SWE-bench Lite #10'],
+    difficulties: ['medium','medium','medium'],
+    live: false,
+    data: {
+      neural_only:      { correctness:[0.52, 0.48, 0.35], safety:[0.50, 0.46, 0.42], latency:[980, 1020, 1180] },
+      nsn:              { correctness:[0.82, 0.78, 0.70], safety:[0.92, 0.90, 0.88], latency:[2400, 2500, 3000] },
+      symbolic_guided:  { correctness:[0.62, 0.58, 0.48], safety:[0.72, 0.68, 0.64], latency:[1550, 1600, 1850] },
+    }
+  },
+  safety_focus: {
+    tasks: CF_TASKS,
+    difficulties: CF_DIFF,
+    live: false,
+    data: {
+      neural_only:      { correctness:[0.75,0.72,0.70,0.74,0.55,0.52,0.50,0.54,0.51,0.40], safety:[0.38,0.36,0.35,0.37,0.32,0.30,0.31,0.29,0.28,0.25], latency:[770,750,790,760,910,940,970,930,945,1100] },
+      nsn:              { correctness:[0.90,0.88,0.86,0.89,0.84,0.81,0.79,0.83,0.82,0.75], safety:[0.99,0.98,0.98,0.99,0.97,0.96,0.95,0.96,0.95,0.93], latency:[1950,1900,2000,1920,2250,2350,2450,2300,2320,2750] },
+      symbolic_guided:  { correctness:[0.80,0.77,0.75,0.78,0.65,0.62,0.60,0.64,0.62,0.55], safety:[0.90,0.88,0.86,0.88,0.82,0.80,0.78,0.81,0.79,0.76], latency:[1280,1250,1300,1270,1480,1520,1580,1500,1530,1720] },
+    }
+  }
+};
+
+let current = 'default';
+
+function avg(arr) { return arr.length ? arr.reduce((a,b)=>a+b,0)/arr.length : 0; }
+function pct(v) { return (v*100).toFixed(1)+'%'; }
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function difficultyForTask(tid) {
+  const i = CF_TASKS.indexOf(tid);
+  return i >= 0 ? CF_DIFF[i] : '?';
+}
+
+/** Build dashboard scenario from app.py results.json (flat array). */
+function buildLiveScenario(rows) {
+  const grid = {};
+  for (const r of rows) {
+    if (!grid[r.task_id]) grid[r.task_id] = {};
+    grid[r.task_id][r.approach] = r;
+  }
+  const taskIds = [...new Set(rows.map(x => x.task_id))];
+  taskIds.sort((a, b) => {
+    const ia = CF_TASKS.indexOf(a), ib = CF_TASKS.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  const tasks = taskIds;
+  const difficulties = tasks.map(tid => {
+    const row = APPROACHES.map(a => grid[tid]?.[a]).find(Boolean);
+    return row?.difficulty || difficultyForTask(tid);
+  });
+
+  const data = {};
+  for (const a of APPROACHES) {
+    data[a] = { correctness: [], safety: [], latency: [] };
+    for (const tid of tasks) {
+      const r = grid[tid]?.[a];
+      if (!r || r.error) {
+        data[a].correctness.push(0);
+        data[a].safety.push(0);
+        data[a].latency.push(r?.latency_ms ?? 0);
+      } else {
+        const corr = r.tests_total ? r.tests_passed / r.tests_total : 0;
+        const safe = r.symbolic_checks_total ? r.symbolic_checks_passed / r.symbolic_checks_total : 0;
+        data[a].correctness.push(corr);
+        data[a].safety.push(safe);
+        data[a].latency.push(r.latency_ms ?? 0);
+      }
+    }
+  }
+
+  return { tasks, difficulties, data, grid, live: true };
+}
+
+function renderSummaryCardsFromData(d) {
+  const el = document.getElementById('summary-cards');
+  const metrics = APPROACHES.map(a => ({
+    label: LABELS[a],
+    correctness: avg(d[a].correctness),
+    safety: avg(d[a].safety),
+    latency: avg(d[a].latency),
+    color: COLORS[a]
+  }));
+  el.innerHTML = metrics.map(m => `
+    <div class="card">
+      <h3>${m.label}</h3>
+      <div class="big" style="color:${m.color}">${pct(m.correctness)}</div>
+      <div class="sub">correctness (tests)</div>
+      <div style="margin-top:0.75rem;display:flex;gap:1.5rem">
+        <div><div style="color:${m.color};font-weight:700">${pct(m.safety)}</div><div class="sub">safety</div></div>
+        <div><div style="color:${m.color};font-weight:700">${Math.round(m.latency)}ms</div><div class="sub">latency</div></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderBar(containerId, values, maxVal) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = APPROACHES.map((a,i) => `
+    <div class="bar-group">
+      <div class="bar-label"><span>${LABELS[a]}</span><span style="color:${COLORS[a]};font-weight:700">${typeof values[i] === 'number' && values[i] > 1 ? Math.round(values[i])+'ms' : pct(values[i])}</span></div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:0%;background:${COLORS[a]}" data-target="${(values[i]/maxVal*100).toFixed(1)}"></div>
+      </div>
+    </div>
+  `).join('');
+  requestAnimationFrame(() => {
+    el.querySelectorAll('.bar-fill').forEach(b => { b.style.width = b.dataset.target + '%'; });
+  });
+}
+
+function renderTable(sc) {
+  const tbody = document.getElementById('results-body');
+  const rows = [];
+  const live = sc.live === true && sc.grid;
+
+  sc.tasks.forEach((task, i) => {
+    APPROACHES.forEach(a => {
+      const d = sc.data[a];
+      const c = d.correctness[i];
+      const s = d.safety[i];
+      const l = d.latency[i];
+      let testsCell;
+      let violCell;
+      let violOk = false;
+
+      if (live) {
+        const r = sc.grid[task]?.[a];
+        if (!r) {
+          testsCell = '—';
+          violCell = '<span style="color:var(--muted)">missing</span>';
+        } else if (r.error) {
+          testsCell = '—';
+          violCell = `<span style="color:var(--danger)" title="${escapeHtml(r.error)}">run error</span>`;
+        } else {
+          testsCell = `${r.tests_passed}/${r.tests_total}`;
+          const nv = (r.safety_violations && r.safety_violations.length) || 0;
+          violCell = nv ? `${nv} symbolic` : 'none';
+          violOk = nv === 0;
+        }
+      } else {
+        testsCell = '—';
+        const viol = Math.round((1 - s) * 4);
+        violCell = viol === 0 ? 'none (demo)' : viol + ' sim.';
+        violOk = viol === 0;
+      }
+
+      rows.push(`
+        <tr>
+          <td style="font-size:11px;color:#94a3b8">${task}</td>
+          <td><span class="pill" style="background:#1e293b;color:#94a3b8">${sc.difficulties[i]}</span></td>
+          <td><span class="badge badge-${a==='neural_only'?'n':a==='nsn'?'nsn':'sg'}">${LABELS[a]}</span></td>
+          <td class="${c>=0.8?'pass':'fail'}">${pct(c)}</td>
+          <td class="${s>=0.85?'pass':'fail'}">${pct(s)}</td>
+          <td>${Math.round(l)}ms</td>
+          <td style="font-size:11px">${testsCell}</td>
+          <td class="${violOk ? 'pass' : 'fail'}">${violCell}</td>
+        </tr>
+      `);
+    });
+  });
+  tbody.innerHTML = rows.join('');
+}
+
+function renderDashboard(sc) {
+  const d = sc.data;
+  renderSummaryCardsFromData(d);
+  renderBar('correctness-chart', APPROACHES.map(a => avg(d[a].correctness)), 1);
+  renderBar('safety-chart',      APPROACHES.map(a => avg(d[a].safety)),      1);
+  const lats = APPROACHES.map(a => avg(d[a].latency));
+  renderBar('latency-chart',     lats, Math.max(...lats, 1) * 1.1);
+  renderTable(sc);
+}
+
+function loadScenario(name) {
+  current = name;
+  document.querySelectorAll('[data-scenario]').forEach(b => {
+    b.classList.toggle('active', b.dataset.scenario === name);
+  });
+  document.getElementById('btn-live')?.classList.remove('active');
+  const sc = SCENARIOS[name];
+  sc.live = false;
+  renderDashboard(sc);
+  document.getElementById('live-banner').innerHTML =
+    '<strong>Demo data</strong> — simulated metrics. Run <code>python app.py</code>, then <strong>Live results</strong> or open via HTTP (see footer).';
+}
+
+function applyLiveResults(rows) {
+  current = 'live';
+  const sc = buildLiveScenario(rows);
+  document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('[data-scenario]').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-live')?.classList.add('active');
+  const nTasks = new Set(rows.map(r => r.task_id)).size;
+  document.getElementById('live-banner').innerHTML =
+    `<strong>Live benchmark output</strong> — ${rows.length} rows (${nTasks} tasks × 3 approaches). ` +
+    'Correctness = tests_passed / tests_total from subprocess runs in <code>app.py</code> (<code>_run_tests</code>).';
+  renderDashboard(sc);
+}
+
+async function reloadLiveResults() {
+  const banner = document.getElementById('live-banner');
+  try {
+    const res = await fetch('results.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error(res.status + ' ' + res.statusText);
+    const rows = await res.json();
+    if (!Array.isArray(rows)) throw new Error('results.json must be a JSON array');
+    applyLiveResults(rows);
+  } catch (e) {
+    banner.innerHTML =
+      '<strong style="color:var(--danger)">Could not load results.json</strong> — ' + escapeHtml(e.message) +
+      '. Serve this folder over HTTP (e.g. <code>python -m http.server 8080</code>) or use <strong>Load JSON file…</strong>. Showing demo.';
+    document.querySelectorAll('[data-scenario]').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-live')?.classList.remove('active');
+    current = 'default';
+    const sc = SCENARIOS.default;
+    sc.live = false;
+    renderDashboard(sc);
+  }
+}
+
+function randomize() {
+  const sc = JSON.parse(JSON.stringify(SCENARIOS.default));
+  sc.live = false;
+  APPROACHES.forEach(a => {
+    ['correctness','safety'].forEach(k => {
+      sc.data[a][k] = sc.data[a][k].map(v => Math.min(1, Math.max(0, v + (Math.random()-0.5)*0.15)));
+    });
+    sc.data[a].latency = sc.data[a].latency.map(v => Math.round(v * (0.85 + Math.random()*0.3)));
+  });
+  current = '_rand';
+  document.querySelectorAll('[data-scenario]').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-live')?.classList.remove('active');
+  document.getElementById('live-banner').innerHTML = '<strong>Randomized demo</strong> (not live data).';
+  renderDashboard(sc);
+}
+
+document.getElementById('results-file').addEventListener('change', async (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    const text = await f.text();
+    const rows = JSON.parse(text);
+    applyLiveResults(rows);
+  } catch (err) {
+    document.getElementById('live-banner').innerHTML =
+      '<strong style="color:var(--danger)">Invalid file</strong> — ' + escapeHtml(err.message);
+  }
+});
+
+reloadLiveResults();
+</script>
+</body>
+</html>

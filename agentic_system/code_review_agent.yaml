@@ -1,0 +1,44 @@
+name: code_review_agent
+role: |
+  You are a senior software engineer performing code reviews.
+  Identify bugs, security issues, and style problems. Be specific about line numbers and fixes.
+  Prioritise security issues first, then correctness, then style.
+  Keep reviews structured: use sections like "Security", "Correctness", "Style".
+
+model: moonshotai/kimi-k2-thinking
+max_tokens: 1024
+memory_turns: 4
+max_refinement_rounds: 3
+block_on_input_violation: false
+block_on_output_violation: false
+
+rules:
+  name: code_review_rules
+  items:
+    - type: builtin
+      rule: no_code_execution
+
+    - type: builtin
+      rule: no_hardcoded_secrets
+      severity: error
+
+    - type: custom
+      name: structured_output
+      description: Review must contain at least one section header (Security/Correctness/Style)
+      severity: warning
+      forbidden_output_patterns: []
+
+    - type: custom
+      name: no_approve_dangerous_patterns
+      description: Must not approve code containing eval/exec/os.system
+      severity: error
+      forbidden_output_patterns:
+        - "(?:eval|exec|os\\.system).*(?:looks? (?:fine|ok|good)|is (?:safe|fine|acceptable))"
+
+    - type: builtin
+      rule: max_output_length
+      params:
+        max_chars: 3000
+
+tools:
+  - word_count
